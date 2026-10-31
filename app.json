@@ -1,0 +1,46 @@
+{
+  "expo": {
+    "name": "Expenses",
+    "slug": "expense",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "expense",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#FFE8D9",
+        "foregroundImage": "./assets/icon.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow Expenses to access your photos so you can attach receipt images.",
+          "cameraPermission": "Allow Expenses to use the camera so you can snap a photo of a receipt.",
+          "microphonePermission": false
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "7bea3c25-a948-4fb1-9a11-17781ab08d0c"
+      }
+    },
+    "owner": "luidonalds-team"
+  }
+}
