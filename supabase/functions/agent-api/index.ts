@@ -33,6 +33,10 @@ const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const AGENT_TOKEN =
   Deno.env.get("EXPENSE_AGENT_TOKEN") ?? Deno.env.get("AGENT_API_TOKEN") ?? "";
 
+// The app is multi-user; expenses are owned per-user. This agent logs for ONE
+// user (the token's owner). Set AGENT_USER_ID to that user's auth uid.
+const AGENT_USER_ID = Deno.env.get("AGENT_USER_ID") ?? "";
+
 // Keep this list in sync with src/data/categories.ts. New categories are still
 // accepted (you said you'd refine them) — this is just the known set.
 const CATEGORIES = [
@@ -130,6 +134,7 @@ async function listExpenses(url: URL): Promise<Response> {
   let query = db
     .from("expenses")
     .select("*", { count: "exact" })
+    .eq("user_id", AGENT_USER_ID)
     .order("date", { ascending: false })
     .order("created_at", { ascending: false });
 
@@ -170,6 +175,7 @@ async function monthSummary(url: URL): Promise<Response> {
   const { data, error } = await db
     .from("expenses")
     .select("*")
+    .eq("user_id", AGENT_USER_ID)
     .gte("date", `${month}-01`)
     .lte("date", `${month}-31`);
   if (error) throw error;
@@ -198,6 +204,7 @@ async function getExpense(id: string): Promise<Response> {
     .from("expenses")
     .select("*")
     .eq("id", id)
+    .eq("user_id", AGENT_USER_ID)
     .maybeSingle();
   if (error) throw error;
   if (!data) return json({ error: "Expense not found" }, 404);
@@ -218,6 +225,7 @@ async function createExpense(req: Request): Promise<Response> {
   }
 
   const row = {
+    user_id: AGENT_USER_ID,
     merchant: merchant.trim(),
     amount,
     category: normalizeCategory(optString(body.category, "category")) ?? "",
@@ -266,6 +274,7 @@ async function patchExpense(id: string, req: Request): Promise<Response> {
     .from("expenses")
     .update(update)
     .eq("id", id)
+    .eq("user_id", AGENT_USER_ID)
     .select("*")
     .maybeSingle();
   if (error) throw error;
@@ -279,6 +288,7 @@ async function deleteExpense(id: string): Promise<Response> {
     .from("expenses")
     .delete()
     .eq("id", id)
+    .eq("user_id", AGENT_USER_ID)
     .select("id");
   if (error) throw error;
   if (!data || data.length === 0) return json({ error: "Expense not found" }, 404);
@@ -294,6 +304,9 @@ Deno.serve(async (req: Request) => {
   }
   if (!AGENT_TOKEN) {
     return json({ error: "Server not configured (AGENT_API_TOKEN not set)" }, 500);
+  }
+  if (!AGENT_USER_ID) {
+    return json({ error: "Server not configured (AGENT_USER_ID not set)" }, 500);
   }
 
   // Bearer auth.

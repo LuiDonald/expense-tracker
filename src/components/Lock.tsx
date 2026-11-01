@@ -9,32 +9,34 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { useAuth, sendMagicLink, ownerEmail, REQUIRE_LOGIN } from "../lib/auth";
+import { useAuth, sendMagicLink, REQUIRE_LOGIN } from "../lib/auth";
 import { isSupabaseConfigured } from "../lib/supabase";
 import {
   getPasscodeStatus,
   setPasscode,
   unlockWithPasscode,
+  PasscodeUser,
 } from "../lib/passcode";
 import { colors, maxContentWidth, radius, spacing } from "../lib/theme";
 
 /**
- * Wraps the whole app. While the owner isn't signed in (or hasn't set a
- * passcode yet) it shows the passcode gate instead of the app. A correct
- * passcode mints a real owner session, so the data stays protected by RLS.
+ * Wraps the whole app. Until the signed-in user is one of the allowed accounts
+ * (and has a passcode), it shows the passcode gate: pick who you are, then
+ * enter your passcode. A correct passcode mints that user's session, so each
+ * person sees only their own expenses (owner-scoped RLS).
  */
 export function LockGate({ children }: { children: React.ReactNode }) {
-  const { isOwner, ready } = useAuth();
-  const [status, setStatus] = useState<"loading" | "set" | "unset" | "error">(
-    "loading",
-  );
+  const { email, isOwner, ready } = useAuth();
+  const [users, setUsers] = useState<PasscodeUser[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [selected, setSelected] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
-      const configured = await getPasscodeStatus();
-      setStatus(configured ? "set" : "unset");
+      setUsers(await getPasscodeStatus());
+      setFailed(false);
     } catch {
-      setStatus("error");
+      setFailed(true);
     }
   }, []);
 
@@ -45,16 +47,24 @@ export function LockGate({ children }: { children: React.ReactNode }) {
   // Open testing mode, or no backend — no gate.
   if (!REQUIRE_LOGIN || !isSupabaseConfigured) return <>{children}</>;
 
-  if (!ready || status === "loading") return <Splash />;
-  if (status === "error") return <ErrorState onRetry={refresh} />;
+  if (!ready || (!users && !failed)) return <Splash />;
+  if (failed || !users) return <ErrorState onRetry={refresh} />;
 
+  // Signed in as an allowed user: let them in, unless they still need a passcode.
   if (isOwner) {
-    // Signed in: either we're done, or this is first-time setup.
-    return status === "set" ? <>{children}</> : <CreatePasscode onDone={refresh} />;
+    const me = users.find((u) => u.email === (email ?? "").toLowerCase());
+    if (me && !me.configured) return <CreatePasscode onDone={refresh} />;
+    return <>{children}</>;
   }
 
-  // Signed out: enter the passcode, or start first-time email setup.
-  return status === "set" ? <EnterPasscode /> : <FirstTimeEmail />;
+  // Signed out: pick who you are, then unlock (or first-time email setup).
+  if (!selected) return <UserPicker users={users} onPick={setSelected} />;
+  const user = users.find((u) => u.email === selected) ?? users[0];
+  return user.configured ? (
+    <EnterPasscode user={user} onBack={() => setSelected(null)} />
+  ) : (
+    <FirstTimeEmail user={user} onBack={() => setSelected(null)} />
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -80,20 +90,52 @@ function ErrorState({ onRetry }: { onRetry: () => void }) {
   );
 }
 
-function EnterPasscode() {
+function UserPicker({
+  users,
+  onPick,
+}: {
+  users: PasscodeUser[];
+  onPick: (email: string) => void;
+}) {
+  return (
+    <Shell>
+      <Text style={styles.emoji}>🔒</Text>
+      <Text style={styles.title}>Who's this?</Text>
+      <Text style={styles.body}>Choose your account to unlock your expenses.</Text>
+      {users.map((u) => (
+        <Pressable key={u.email} style={styles.userBtn} onPress={() => onPick(u.email)}>
+          <Text style={styles.userName}>{u.name}</Text>
+          <Text style={styles.userMeta}>
+            {u.configured ? "Enter passcode" : "First-time setup"}
+          </Text>
+        </Pressable>
+      ))}
+    </Shell>
+  );
+}
+
+function EnterPasscode({
+  user,
+  onBack,
+}: {
+  user: PasscodeUser;
+  onBack: () => void;
+}) {
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [useEmail, setUseEmail] = useState(false);
 
-  if (useEmail) return <FirstTimeEmail forgot onBack={() => setUseEmail(false)} />;
+  if (useEmail) {
+    return <FirstTimeEmail user={user} forgot onBack={() => setUseEmail(false)} />;
+  }
 
   const submit = async () => {
     if (!code.trim()) return;
     setError(null);
     setBusy(true);
     try {
-      await unlockWithPasscode(code.trim());
+      await unlockWithPasscode(user.email, code.trim());
       // Session is set — the gate re-renders and shows the app.
     } catch (e: any) {
       setError(e?.message ?? "Incorrect passcode");
@@ -106,8 +148,8 @@ function EnterPasscode() {
   return (
     <Shell>
       <Text style={styles.emoji}>🔒</Text>
-      <Text style={styles.title}>Enter your passcode</Text>
-      <Text style={styles.body}>Unlock your expenses.</Text>
+      <Text style={styles.title}>Hi {user.name}</Text>
+      <Text style={styles.body}>Enter your passcode to unlock.</Text>
       <TextInput
         style={styles.code}
         value={code}
@@ -139,6 +181,9 @@ function EnterPasscode() {
       </Pressable>
       <Pressable onPress={() => setUseEmail(true)} hitSlop={8}>
         <Text style={styles.link}>Forgot? Use email instead</Text>
+      </Pressable>
+      <Pressable onPress={onBack} hitSlop={8}>
+        <Text style={styles.linkMuted}>← Not {user.name}?</Text>
       </Pressable>
     </Shell>
   );
@@ -221,9 +266,11 @@ function CreatePasscode({ onDone }: { onDone: () => void }) {
 }
 
 function FirstTimeEmail({
+  user,
   forgot = false,
   onBack,
 }: {
+  user: PasscodeUser;
   forgot?: boolean;
   onBack?: () => void;
 }) {
@@ -235,7 +282,7 @@ function FirstTimeEmail({
     setError(null);
     setBusy(true);
     try {
-      await sendMagicLink(ownerEmail);
+      await sendMagicLink(user.email);
       setSent(true);
     } catch (e: any) {
       setError(e?.message ?? "Could not send the link");
@@ -250,9 +297,14 @@ function FirstTimeEmail({
         <Text style={styles.emoji}>📧</Text>
         <Text style={styles.title}>Check your email</Text>
         <Text style={styles.body}>
-          We sent a one-time sign-in link to {ownerEmail}. Open it on this
+          We sent a one-time sign-in link to {user.email}. Open it on this
           device, then you can {forgot ? "set a new passcode" : "choose your passcode"}.
         </Text>
+        {onBack && (
+          <Pressable onPress={onBack} hitSlop={8}>
+            <Text style={styles.linkMuted}>← Back</Text>
+          </Pressable>
+        )}
       </Shell>
     );
   }
@@ -261,14 +313,14 @@ function FirstTimeEmail({
     <Shell>
       <Text style={styles.emoji}>{forgot ? "🔑" : "👋"}</Text>
       <Text style={styles.title}>
-        {forgot ? "Reset with email" : "Set up your passcode"}
+        {forgot ? `Reset ${user.name}'s passcode` : `Set up ${user.name}'s passcode`}
       </Text>
       <Text style={styles.body}>
         {forgot
           ? "Confirm it's you with a one-time email link, then set a new passcode."
-          : "First, let's confirm it's you. We'll email a one-time sign-in link to the owner address — then you choose a passcode for next time."}
+          : "First, let's confirm it's you. We'll email a one-time sign-in link — then you choose a passcode for next time."}
       </Text>
-      <Text style={styles.ownerEmail}>{ownerEmail}</Text>
+      <Text style={styles.ownerEmail}>{user.email}</Text>
       {error && <Text style={styles.error}>{error}</Text>}
       <Pressable
         style={[styles.primaryBtn, busy && styles.btnDisabled]}
@@ -281,9 +333,9 @@ function FirstTimeEmail({
           <Text style={styles.primaryBtnText}>Email me a link</Text>
         )}
       </Pressable>
-      {forgot && onBack && (
+      {onBack && (
         <Pressable onPress={onBack} hitSlop={8}>
-          <Text style={styles.link}>Back to passcode</Text>
+          <Text style={styles.linkMuted}>← Back</Text>
         </Pressable>
       )}
     </Shell>
@@ -328,6 +380,18 @@ const styles = StyleSheet.create({
     fontSize: 15,
     marginTop: spacing.xs,
   },
+  userBtn: {
+    marginTop: spacing.md,
+    width: "100%",
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+  },
+  userName: { fontSize: 18, fontWeight: "700", color: colors.text },
+  userMeta: { fontSize: 13, color: colors.textMuted, marginTop: 2 },
   code: {
     marginTop: spacing.md,
     width: "100%",
@@ -358,6 +422,12 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
     color: colors.primary,
     fontWeight: "600",
+    fontSize: 14,
+  },
+  linkMuted: {
+    marginTop: spacing.sm,
+    color: colors.textMuted,
+    fontWeight: "500",
     fontSize: 14,
   },
 });

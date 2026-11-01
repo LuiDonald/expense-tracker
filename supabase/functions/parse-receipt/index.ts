@@ -85,7 +85,11 @@ Deno.serve(async (req: Request) => {
   if (requireOwner) {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
-    const ownerEmail = (Deno.env.get("OWNER_EMAIL") ?? "").toLowerCase().trim();
+    // Allowed emails: OWNER_USERS ("email:Name,email2:Name2") or OWNER_EMAIL.
+    const allowed = (Deno.env.get("OWNER_USERS") ?? Deno.env.get("OWNER_EMAIL") ?? "")
+      .split(",")
+      .map((p) => (p.split(":")[0] ?? "").toLowerCase().trim())
+      .filter(Boolean);
     const authHeader = req.headers.get("Authorization") ?? "";
 
     const supabase = createClient(supabaseUrl, anonKey, {
@@ -98,7 +102,7 @@ Deno.serve(async (req: Request) => {
 
     if (userErr || !user) return json({ error: "Not signed in" }, 401);
     const email = (user.email ?? "").toLowerCase();
-    if (ownerEmail && email !== ownerEmail) {
+    if (allowed.length > 0 && !allowed.includes(email)) {
       return json({ error: "Not authorized" }, 403);
     }
   }

@@ -7,9 +7,10 @@ the same stack as the Recipe app. You log expenses from a **photo of a receipt**
 category breakdown** plus an all-time **Categories** view. Your agent **Muse**
 can also log expenses for you — just send it a receipt photo in chat.
 
-The app is **locked to one owner account**. Day to day you unlock it with a
-**passcode**; a correct passcode mints a real owner session, so the data is
-protected by Supabase Row Level Security (not just hidden buttons).
+The app supports **multiple private accounts** (e.g. two spouses). Each person
+picks who they are, unlocks with **their own passcode**, and sees **only their
+own expenses** — enforced by Supabase Row Level Security (not just hidden
+buttons). A correct passcode mints that user's real session.
 
 ## Features
 
@@ -63,11 +64,25 @@ supabase/
   functions/passcode      # Edge fn: passcode status / set / verify (mints owner session)
 ```
 
+## Users (multi-account)
+
+Allowed accounts live in three places that must agree:
+
+- App: `EXPO_PUBLIC_APP_USERS` = `email:Name,email2:Name2` (in `.env`)
+- Functions: the `OWNER_USERS` secret (same format) + `OWNER_EMAILS`
+- Database: the email list in `supabase/schema-multiuser.sql` (storage policies)
+
+Each user owns their rows (`expenses.user_id = auth.uid()`) and has their own
+row in `user_passcode`. To **add a person**: create their Supabase auth user,
+add them to those three lists, run the storage-policy part of
+`schema-multiuser.sql`, and redeploy the functions + web build. Muse's
+`agent-api` logs for one user, set by the `AGENT_USER_ID` secret.
+
 ## How the passcode lock works
 
-1. **First run** (no passcode set): the app shows **"Set up your passcode"** and
-   emails a one-time sign-in link to the owner address. Open it on the device,
-   then **choose a passcode**.
+1. **First run** for each user: on the **"Who's this?"** screen pick your name,
+   then (if you have no passcode yet) tap **"Email me a link"**, open the
+   one-time link on the device, and **choose a passcode**.
 2. **Every run after:** open the app, type your passcode, you're in. The session
    persists, so you stay unlocked until you log out.
 3. **Change it:** Account tab → **Change passcode**.

@@ -25,14 +25,21 @@ async function messageFrom(error: unknown, fallback: string): Promise<string> {
   return (error as any)?.message ?? fallback;
 }
 
-export async function getPasscodeStatus(): Promise<boolean> {
-  if (!isSupabaseConfigured || !supabase) return false;
+/** One allowed account plus whether they've set a passcode yet. */
+export interface PasscodeUser {
+  email: string;
+  name: string;
+  configured: boolean;
+}
+
+export async function getPasscodeStatus(): Promise<PasscodeUser[]> {
+  if (!isSupabaseConfigured || !supabase) return [];
   const { data, error } = await supabase.functions.invoke(
     "passcode?action=status",
     { method: "GET" },
   );
   if (error) throw new Error(await messageFrom(error, "Could not reach the server"));
-  return !!(data as any)?.configured;
+  return ((data as any)?.users ?? []) as PasscodeUser[];
 }
 
 export async function setPasscode(code: string): Promise<void> {
@@ -48,11 +55,11 @@ export async function setPasscode(code: string): Promise<void> {
  * Verify the passcode and, on success, sign the owner in. Throws with a
  * friendly message on a wrong code / lockout.
  */
-export async function unlockWithPasscode(code: string): Promise<void> {
+export async function unlockWithPasscode(email: string, code: string): Promise<void> {
   if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured");
   const { data, error } = await supabase.functions.invoke("passcode?action=verify", {
     method: "POST",
-    body: { code },
+    body: { email, code },
   });
   if (error) throw new Error(await messageFrom(error, "Incorrect passcode"));
 

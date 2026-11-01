@@ -11,9 +11,39 @@ import { supabase, isSupabaseConfigured } from "./supabase";
  * enforcement lives in Supabase Row Level Security, which rejects every read
  * and write that doesn't come from the owner's authenticated session.
  */
-const OWNER_EMAIL = (process.env.EXPO_PUBLIC_OWNER_EMAIL ?? "")
-  .toLowerCase()
-  .trim();
+/** One allowed account (email + display name for the login picker). */
+export interface AppUser {
+  email: string;
+  name: string;
+}
+
+/**
+ * The accounts allowed to use this app, from EXPO_PUBLIC_APP_USERS, formatted
+ * as "email:Name,email2:Name2". Falls back to the single EXPO_PUBLIC_OWNER_EMAIL.
+ * Each person has their own passcode and their own private expenses.
+ */
+function parseAppUsers(): AppUser[] {
+  const raw = process.env.EXPO_PUBLIC_APP_USERS ?? "";
+  const list = raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((p) => {
+      const [email, name] = p.split(":");
+      const e = (email ?? "").toLowerCase().trim();
+      return { email: e, name: (name ?? e.split("@")[0]).trim() };
+    })
+    .filter((u) => u.email);
+  if (list.length) return list;
+  const single = (process.env.EXPO_PUBLIC_OWNER_EMAIL ?? "").toLowerCase().trim();
+  return single ? [{ email: single, name: single.split("@")[0] }] : [];
+}
+
+export const appUsers = parseAppUsers();
+const ALLOWED_EMAILS = new Set(appUsers.map((u) => u.email));
+
+/** The first allowed email (kept for backwards-compatible call sites). */
+export const ownerEmail = appUsers[0]?.email ?? "";
 
 /**
  * When true, the app is locked behind the passcode gate (see components/Lock).
@@ -79,8 +109,10 @@ export function useAuth(): AuthState {
   const session = currentSession;
   const email = session?.user?.email?.toLowerCase() ?? null;
   const isSignedIn = !!session;
-  // If no owner email is configured, any signed-in user counts as the owner.
-  const isOwner = isSignedIn && (!OWNER_EMAIL || email === OWNER_EMAIL);
+  // Signed in AND one of the allowed accounts. (If none are configured, any
+  // signed-in user is allowed.)
+  const isOwner =
+    isSignedIn && (ALLOWED_EMAILS.size === 0 || ALLOWED_EMAILS.has(email ?? ""));
 
   return { session, email, isSignedIn, isOwner, ready };
 }
@@ -115,6 +147,3 @@ export async function sendMagicLink(email: string): Promise<void> {
 export async function signOut(): Promise<void> {
   await supabase?.auth.signOut();
 }
-
-/** The configured owner email (for display/help text). */
-export const ownerEmail = OWNER_EMAIL;
