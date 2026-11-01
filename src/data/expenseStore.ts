@@ -43,7 +43,12 @@ export interface CategoryGroup extends CategoryTotal {
 }
 
 class ExpenseStore {
-  private expenses: Expense[] = MOCK_EXPENSES.map((e) => ({ ...e }));
+  // When Supabase is configured we start EMPTY and wait for the real data to
+  // load — otherwise the sample expenses would flash on screen before the
+  // user's own data arrives. Only demo mode (no backend) seeds mock data.
+  private expenses: Expense[] = isSupabaseConfigured
+    ? []
+    : MOCK_EXPENSES.map((e) => ({ ...e }));
   private listeners = new Set<Listener>();
   private loaded = false;
 

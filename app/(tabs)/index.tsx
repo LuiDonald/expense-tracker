@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import {
+  ActivityIndicator,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -48,6 +49,15 @@ export default function ExpensesScreen() {
   );
 
   if (locked) return <Locked />;
+
+  // Wait for the first Supabase fetch so we never flash an empty/stale list.
+  if (isSupabaseConfigured && !expenseStore.isLoaded) {
+    return (
+      <View style={styles.loading}>
+        <ActivityIndicator color={colors.primary} />
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -167,6 +177,12 @@ function ExpenseRow({
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
+  loading: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.bg,
+  },
   banner: {
     backgroundColor: colors.primarySoft,
     paddingHorizontal: spacing.lg,
