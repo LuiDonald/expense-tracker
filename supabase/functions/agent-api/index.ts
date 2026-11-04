@@ -67,6 +67,19 @@ const UUID_RE =
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MONTH_RE = /^\d{4}-\d{2}$/;
 
+// Half-open date range [start, endExclusive) for a "YYYY-MM" month. Avoids the
+// invalid "YYYY-MM-31" bug on 28/29/30-day months by using the first of the
+// NEXT month as an exclusive upper bound.
+function monthRange(month: string): { start: string; endExclusive: string } {
+  const [y, m] = month.split("-").map(Number);
+  const nextY = m === 12 ? y + 1 : y;
+  const nextM = m === 12 ? 1 : m + 1;
+  return {
+    start: `${month}-01`,
+    endExclusive: `${nextY}-${String(nextM).padStart(2, "0")}-01`,
+  };
+}
+
 class BadRequest extends Error {}
 
 // ---- shaping DB rows into clean API JSON ----
@@ -140,7 +153,8 @@ async function listExpenses(url: URL): Promise<Response> {
 
   if (month) {
     if (!MONTH_RE.test(month)) throw new BadRequest('"month" must be "YYYY-MM"');
-    query = query.gte("date", `${month}-01`).lte("date", `${month}-31`);
+    const { start, endExclusive } = monthRange(month);
+    query = query.gte("date", start).lt("date", endExclusive);
   }
   if (from) {
     if (!DATE_RE.test(from)) throw new BadRequest('"from" must be "YYYY-MM-DD"');
@@ -172,12 +186,13 @@ async function monthSummary(url: URL): Promise<Response> {
   const month = (url.searchParams.get("month") ?? "").trim();
   if (!MONTH_RE.test(month)) throw new BadRequest('"month" query param (YYYY-MM) is required');
 
+  const { start, endExclusive } = monthRange(month);
   const { data, error } = await db
     .from("expenses")
     .select("*")
     .eq("user_id", AGENT_USER_ID)
-    .gte("date", `${month}-01`)
-    .lte("date", `${month}-31`);
+    .gte("date", start)
+    .lt("date", endExclusive);
   if (error) throw error;
 
   const rows = (data ?? []).map(expensePublic);
