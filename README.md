@@ -56,9 +56,11 @@ src/
   types/                  # Expense model
   components/             # LockGate (passcode gate), DialogHost, Locked (legacy)
 supabase/
-  schema.sql              # Table, indexes, owner-only RLS, storage bucket
-  schema-passcode.sql     # Re-lock to owner-only + create the app_lock passcode store
-  schema-open.sql         # TEMP: open everything up for login-less testing
+  schema-fresh.sql        # ⭐ Full multi-user schema for a new project (run this one)
+  schema-multiuser.sql    # One-time migration: single-owner -> per-user (already applied)
+  schema.sql              # Historical: original single-owner table + bucket
+  schema-passcode.sql     # Historical: single-owner app_lock passcode store
+  schema-open.sql         # TEMP: open everything up for login-less testing (see caveat)
   functions/parse-receipt # Edge fn: receipt photo -> expense fields (in-app Scan)
   functions/agent-api     # Edge fn: bearer-token CRUD so Muse can log
   functions/passcode      # Edge fn: passcode status / set / verify (mints owner session)
@@ -69,13 +71,15 @@ supabase/
 Allowed accounts live in three places that must agree:
 
 - App: `EXPO_PUBLIC_APP_USERS` = `email:Name,email2:Name2` (in `.env`)
-- Functions: the `OWNER_USERS` secret (same format) + `OWNER_EMAILS`
-- Database: the email list in `supabase/schema-multiuser.sql` (storage policies)
+- Functions: the `OWNER_USERS` secret (same format)
+- Database: the email list in the receipt-photo storage policies
+  (`supabase/schema-fresh.sql`)
 
 Each user owns their rows (`expenses.user_id = auth.uid()`) and has their own
 row in `user_passcode`. To **add a person**: create their Supabase auth user,
-add them to those three lists, run the storage-policy part of
-`schema-multiuser.sql`, and redeploy the functions + web build. Muse's
+add them to those three lists, re-create the three `users … receipt photos`
+storage policies with the new email list (the `drop policy` / `create policy`
+block in `schema-multiuser.sql` does exactly this), and redeploy the functions + web build. Muse's
 `agent-api` logs for one user, set by the `AGENT_USER_ID` secret.
 
 ## How the passcode lock works
@@ -90,11 +94,12 @@ add them to those three lists, run the storage-policy part of
    one-time email link → set a new passcode.
 
 Under the hood: the passcode hash (PBKDF2-SHA256 + per-record salt, 5-attempt
-lockout) lives in the `app_lock` table, which has RLS on and **no policies**, so
-only the `passcode` Edge Function (service role) can touch it — the hash is never
-sent to the browser. On a correct passcode the function returns a one-time
-magic-link token that the app redeems into a real **owner** session, which is
-what satisfies the owner-only RLS on `expenses`.
+lockout) lives in the `user_passcode` table — one row per email — which has RLS
+on and **no policies**, so only the `passcode` Edge Function (service role) can
+touch it; the hash is never sent to the browser. On a correct passcode the
+function returns a one-time magic-link token that the app redeems into that
+user's real session, which is what satisfies the per-user RLS on `expenses`
+(`user_id = auth.uid()`).
 
 ## Getting started
 
@@ -124,24 +129,28 @@ cp .env.example .env
 ```
 EXPO_PUBLIC_SUPABASE_URL=https://<your-project>.supabase.co
 EXPO_PUBLIC_SUPABASE_ANON_KEY=<your-anon-key>
-EXPO_PUBLIC_OWNER_EMAIL=you@example.com   # the ONLY account with access
+EXPO_PUBLIC_APP_USERS=you@example.com:You,partner@example.com:Partner
+# EXPO_PUBLIC_OWNER_EMAIL=you@example.com   # legacy single-user fallback
 ```
 
-> This project reuses the **Recipe app's** Supabase project, so the shared
-> secrets (`OPENAI_API_KEY`, `OWNER_EMAIL`, service keys) were already set.
+> The app runs on its **own dedicated Supabase project**
+> (`iidnjpxkgtrctoqfukew`). It no longer shares the Recipe app's project, so
+> every secret below has to be set on this project.
 
 ### 4. Set up the database
 
-In **SQL Editor → New query**, run (replace `donaldtlui@gmail.com` with your
-owner email, lowercase, if you fork this):
+In **SQL Editor → New query**, run
+[`supabase/schema-fresh.sql`](supabase/schema-fresh.sql). In one go it creates
+the `expenses` table with per-user RLS, the `receipt-photos` bucket and its
+policies, and the `user_passcode` store. If you fork this, edit the email list
+in the storage policies first (lowercase).
 
-- [`supabase/schema.sql`](supabase/schema.sql) — the `expenses` table, indexes,
-  owner-only RLS, and the `receipt-photos` bucket, **then**
-- [`supabase/schema-passcode.sql`](supabase/schema-passcode.sql) — the
-  `app_lock` passcode store (and it re-asserts the owner-only policies).
+The other `.sql` files are history: `schema.sql` → `schema-passcode.sql` →
+`schema-multiuser.sql` is how the original shared project got here. Don't run
+them on a new project.
 
-Also make sure the owner user exists (**Authentication → Users**), email sign-in
-is enabled, new sign-ups are disabled, and your app URL is in **Authentication →
+Also make sure each user exists (**Authentication → Users**), email sign-in is
+enabled, new sign-ups are disabled, and your app URL is in **Authentication →
 URL Configuration → Redirect URLs**.
 
 ### 5. Deploy the Edge Functions
@@ -149,6 +158,11 @@ URL Configuration → Redirect URLs**.
 ```bash
 export SUPABASE_ACCESS_TOKEN=<a Supabase access token>
 REF=<your-project-ref>
+
+# shared by the functions
+supabase secrets set OPENAI_API_KEY=<key> \
+  OWNER_USERS="you@example.com:You,partner@example.com:Partner" \
+  --project-ref $REF
 
 # receipt scanning (owner-gated); uses gpt-4o-mini via RECEIPT_MODEL
 supabase secrets set REQUIRE_OWNER=true RECEIPT_MODEL=gpt-4o-mini --project-ref $REF
@@ -158,7 +172,8 @@ supabase functions deploy parse-receipt --project-ref $REF --no-verify-jwt
 supabase functions deploy passcode --project-ref $REF --no-verify-jwt
 
 # Muse's API (token-based)
-supabase secrets set EXPENSE_AGENT_TOKEN=$(openssl rand -hex 32) --project-ref $REF
+supabase secrets set EXPENSE_AGENT_TOKEN=$(openssl rand -hex 32) \
+  AGENT_USER_ID=<auth user id Muse logs for> --project-ref $REF
 supabase functions deploy agent-api --project-ref $REF --no-verify-jwt
 ```
 
@@ -195,7 +210,7 @@ Header on every call: `Authorization: Bearer <EXPENSE_AGENT_TOKEN>`
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| `GET`    | `/expenses` | list / filter (`?month=&category=&limit=&offset=`) |
+| `GET`    | `/expenses` | list / filter (`?month=YYYY-MM&category=&from=&to=&q=&limit=&offset=`) |
 | `POST`   | `/expenses` | create — `{merchant, amount, category, date, note, photoUrl?}` |
 | `GET`    | `/expenses/summary?month=YYYY-MM` | month total + category breakdown |
 | `GET`    | `/expenses/:id` | one expense |
@@ -223,12 +238,18 @@ Each layer has one switch:
 | | Open (testing) | Locked (passcode) |
 |---|---|---|
 | App | `REQUIRE_LOGIN = false` in `src/lib/auth.ts` | `REQUIRE_LOGIN = true` |
-| Database | run `supabase/schema-open.sql` | run `supabase/schema-passcode.sql` |
+| Database | run `supabase/schema-open.sql` | drop the `open …` policies it added |
 | Receipt scan | `REQUIRE_OWNER=false` secret | `REQUIRE_OWNER=true` secret |
 
 After flipping the app flag, rebuild + redeploy the web front-end. ⚠️ In open
 mode anyone with the URL can read/write your expenses and trigger paid OpenAI
 scans — use it only briefly.
+
+⚠️ **Not updated for multi-user.** `schema-open.sql` predates per-user
+expenses. `expenses.user_id` is now required and defaults to `auth.uid()`, so
+inserts without a login fail. Its `open …` policies would also let each user
+see the other's expenses. Don't use `schema-passcode.sql` to re-lock either:
+it restores the old single-owner setup.
 
 ## Refining categories later
 
