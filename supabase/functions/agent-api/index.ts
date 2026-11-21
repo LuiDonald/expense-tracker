@@ -9,11 +9,18 @@
 // without a user login — the bearer token IS the auth. Keep that token secret.
 //
 // IMPORTANT — deploy with JWT verification OFF, because we authenticate with our
-// own AGENT_API_TOKEN (a bearer token) rather than a Supabase user JWT:
+// own bearer tokens rather than a Supabase user JWT:
 //   supabase functions deploy agent-api --no-verify-jwt --project-ref <ref>
 //
+// Multi-user: each person gets their OWN token, and the token decides whose
+// expenses are read and written. One person's token can never see or change
+// the other's expenses.
+//
 // Secrets (Dashboard > Edge Functions > Secrets, or `supabase secrets set`):
-//   AGENT_API_TOKEN = <a long random string the client sends as the bearer>
+//   AGENT_TOKENS = "<token1>:<email-or-user-id>,<token2>:<email-or-user-id>"
+//     e.g. "3f9a…:donaldtlui@gmail.com,b71c…:grantiana.ko@gmail.com"
+//   Legacy single-user form (still honored, merged with AGENT_TOKENS):
+//     EXPENSE_AGENT_TOKEN (or AGENT_API_TOKEN) + AGENT_USER_ID
 // Auto-injected by Supabase (do NOT set these yourself):
 //   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 //
@@ -29,13 +36,48 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-// Dedicated expense token (isolated from Recipe's shared AGENT_API_TOKEN).
-const AGENT_TOKEN =
-  Deno.env.get("EXPENSE_AGENT_TOKEN") ?? Deno.env.get("AGENT_API_TOKEN") ?? "";
 
-// The app is multi-user; expenses are owned per-user. This agent logs for ONE
-// user (the token's owner). Set AGENT_USER_ID to that user's auth uid.
-const AGENT_USER_ID = Deno.env.get("AGENT_USER_ID") ?? "";
+/** token -> owner ("email" or auth user id), from AGENT_TOKENS + legacy secrets. */
+function loadTokenOwners(): Map<string, string> {
+  const owners = new Map<string, string>();
+  for (const pair of (Deno.env.get("AGENT_TOKENS") ?? "").split(",")) {
+    const i = pair.indexOf(":");
+    if (i <= 0) continue;
+    const token = pair.slice(0, i).trim();
+    const owner = pair.slice(i + 1).trim().toLowerCase();
+    if (token && owner) owners.set(token, owner);
+  }
+  // Legacy: one token for one user (kept so an existing Muse setup keeps working).
+  const legacyToken = (
+    Deno.env.get("EXPENSE_AGENT_TOKEN") ?? Deno.env.get("AGENT_API_TOKEN") ?? ""
+  ).trim();
+  const legacyUser = (Deno.env.get("AGENT_USER_ID") ?? "").trim().toLowerCase();
+  if (legacyToken && legacyUser && !owners.has(legacyToken)) {
+    owners.set(legacyToken, legacyUser);
+  }
+  return owners;
+}
+const TOKEN_OWNERS = loadTokenOwners();
+
+/** Constant-time string compare, so response timing doesn't leak the token. */
+function safeEqual(a: string, b: string): boolean {
+  const ea = new TextEncoder().encode(a);
+  const eb = new TextEncoder().encode(b);
+  let diff = ea.length ^ eb.length;
+  for (let i = 0; i < Math.max(ea.length, eb.length); i++) {
+    diff |= (ea[i] ?? 0) ^ (eb[i] ?? 0);
+  }
+  return diff === 0;
+}
+
+/** The owner string for a bearer token, or null if it isn't one of ours. */
+function ownerForToken(token: string): string | null {
+  let found: string | null = null;
+  for (const [t, owner] of TOKEN_OWNERS) {
+    if (safeEqual(t, token)) found = owner; // no early exit: keep timing flat
+  }
+  return found;
+}
 
 // Keep this list in sync with src/data/categories.ts. New categories are still
 // accepted (you said you'd refine them) — this is just the known set.
@@ -81,6 +123,25 @@ function monthRange(month: string): { start: string; endExclusive: string } {
 }
 
 class BadRequest extends Error {}
+
+// Owner emails are resolved to auth user ids once, then cached.
+const userIdCache = new Map<string, string>();
+async function resolveUserId(owner: string): Promise<string | null> {
+  if (UUID_RE.test(owner)) return owner;
+  const cached = userIdCache.get(owner);
+  if (cached) return cached;
+  for (let page = 1; page <= 10; page++) {
+    const { data, error } = await db.auth.admin.listUsers({ page, perPage: 100 });
+    if (error) throw error;
+    const match = data.users.find((u) => (u.email ?? "").toLowerCase() === owner);
+    if (match) {
+      userIdCache.set(owner, match.id);
+      return match.id;
+    }
+    if (data.users.length < 100) break;
+  }
+  return null;
+}
 
 // ---- shaping DB rows into clean API JSON ----
 function expensePublic(r: Record<string, any>) {
@@ -132,7 +193,7 @@ async function readJson(req: Request): Promise<Record<string, any>> {
 }
 
 // ---- handlers ----
-async function listExpenses(url: URL): Promise<Response> {
+async function listExpenses(userId: string, url: URL): Promise<Response> {
   const month = (url.searchParams.get("month") ?? "").trim();
   const category = (url.searchParams.get("category") ?? "").trim();
   const from = (url.searchParams.get("from") ?? "").trim();
@@ -147,7 +208,7 @@ async function listExpenses(url: URL): Promise<Response> {
   let query = db
     .from("expenses")
     .select("*", { count: "exact" })
-    .eq("user_id", AGENT_USER_ID)
+    .eq("user_id", userId)
     .order("date", { ascending: false })
     .order("created_at", { ascending: false });
 
@@ -182,7 +243,7 @@ async function listExpenses(url: URL): Promise<Response> {
   });
 }
 
-async function monthSummary(url: URL): Promise<Response> {
+async function monthSummary(userId: string, url: URL): Promise<Response> {
   const month = (url.searchParams.get("month") ?? "").trim();
   if (!MONTH_RE.test(month)) throw new BadRequest('"month" query param (YYYY-MM) is required');
 
@@ -190,7 +251,7 @@ async function monthSummary(url: URL): Promise<Response> {
   const { data, error } = await db
     .from("expenses")
     .select("*")
-    .eq("user_id", AGENT_USER_ID)
+    .eq("user_id", userId)
     .gte("date", start)
     .lt("date", endExclusive);
   if (error) throw error;
@@ -213,20 +274,20 @@ async function monthSummary(url: URL): Promise<Response> {
   });
 }
 
-async function getExpense(id: string): Promise<Response> {
+async function getExpense(userId: string, id: string): Promise<Response> {
   if (!UUID_RE.test(id)) throw new BadRequest("Invalid expense id");
   const { data, error } = await db
     .from("expenses")
     .select("*")
     .eq("id", id)
-    .eq("user_id", AGENT_USER_ID)
+    .eq("user_id", userId)
     .maybeSingle();
   if (error) throw error;
   if (!data) return json({ error: "Expense not found" }, 404);
   return json(expensePublic(data));
 }
 
-async function createExpense(req: Request): Promise<Response> {
+async function createExpense(userId: string, req: Request): Promise<Response> {
   const body = await readJson(req);
 
   const merchant = optString(body.merchant, "merchant") ?? "";
@@ -240,7 +301,7 @@ async function createExpense(req: Request): Promise<Response> {
   }
 
   const row = {
-    user_id: AGENT_USER_ID,
+    user_id: userId,
     merchant: merchant.trim(),
     amount,
     category: normalizeCategory(optString(body.category, "category")) ?? "",
@@ -254,7 +315,7 @@ async function createExpense(req: Request): Promise<Response> {
   return json(expensePublic(data), 201);
 }
 
-async function patchExpense(id: string, req: Request): Promise<Response> {
+async function patchExpense(userId: string, id: string, req: Request): Promise<Response> {
   if (!UUID_RE.test(id)) throw new BadRequest("Invalid expense id");
   const body = await readJson(req);
 
@@ -289,7 +350,7 @@ async function patchExpense(id: string, req: Request): Promise<Response> {
     .from("expenses")
     .update(update)
     .eq("id", id)
-    .eq("user_id", AGENT_USER_ID)
+    .eq("user_id", userId)
     .select("*")
     .maybeSingle();
   if (error) throw error;
@@ -297,13 +358,13 @@ async function patchExpense(id: string, req: Request): Promise<Response> {
   return json(expensePublic(data));
 }
 
-async function deleteExpense(id: string): Promise<Response> {
+async function deleteExpense(userId: string, id: string): Promise<Response> {
   if (!UUID_RE.test(id)) throw new BadRequest("Invalid expense id");
   const { data, error } = await db
     .from("expenses")
     .delete()
     .eq("id", id)
-    .eq("user_id", AGENT_USER_ID)
+    .eq("user_id", userId)
     .select("id");
   if (error) throw error;
   if (!data || data.length === 0) return json({ error: "Expense not found" }, 404);
@@ -317,18 +378,27 @@ Deno.serve(async (req: Request) => {
   if (!SERVICE_KEY || !SUPABASE_URL) {
     return json({ error: "Server not configured (service role key missing)" }, 500);
   }
-  if (!AGENT_TOKEN) {
-    return json({ error: "Server not configured (AGENT_API_TOKEN not set)" }, 500);
-  }
-  if (!AGENT_USER_ID) {
-    return json({ error: "Server not configured (AGENT_USER_ID not set)" }, 500);
+  if (TOKEN_OWNERS.size === 0) {
+    return json({ error: "Server not configured (AGENT_TOKENS not set)" }, 500);
   }
 
-  // Bearer auth.
+  // Bearer auth: the token decides whose expenses this request can touch.
   const authz = req.headers.get("Authorization") ?? "";
   const token = authz.startsWith("Bearer ") ? authz.slice(7).trim() : "";
-  if (!token || token !== AGENT_TOKEN) {
+  const owner = token ? ownerForToken(token) : null;
+  if (!owner) {
     return json({ error: "Unauthorized" }, 401);
+  }
+  let userId: string | null;
+  try {
+    userId = await resolveUserId(owner);
+  } catch (e) {
+    console.error("agent-api: user lookup failed:", e);
+    return json({ error: "Could not look up the token's user" }, 500);
+  }
+  if (!userId) {
+    console.error(`agent-api: no auth user for token owner "${owner}"`);
+    return json({ error: "Server not configured (token's user not found)" }, 500);
   }
 
   const url = new URL(req.url);
@@ -342,21 +412,21 @@ Deno.serve(async (req: Request) => {
 
     // /expenses
     if (seg.length === 1) {
-      if (req.method === "GET") return await listExpenses(url);
-      if (req.method === "POST") return await createExpense(req);
+      if (req.method === "GET") return await listExpenses(userId, url);
+      if (req.method === "POST") return await createExpense(userId, req);
       return json({ error: "Method not allowed" }, 405);
     }
 
     // /expenses/summary  or  /expenses/:id
     if (seg.length === 2) {
       if (seg[1] === "summary") {
-        if (req.method === "GET") return await monthSummary(url);
+        if (req.method === "GET") return await monthSummary(userId, url);
         return json({ error: "Method not allowed" }, 405);
       }
       const id = seg[1];
-      if (req.method === "GET") return await getExpense(id);
-      if (req.method === "PATCH") return await patchExpense(id, req);
-      if (req.method === "DELETE") return await deleteExpense(id);
+      if (req.method === "GET") return await getExpense(userId, id);
+      if (req.method === "PATCH") return await patchExpense(userId, id, req);
+      if (req.method === "DELETE") return await deleteExpense(userId, id);
       return json({ error: "Method not allowed" }, 405);
     }
 

@@ -10,14 +10,19 @@ A bearer-token-protected HTTP API over the `expenses` table, so an AI assistant
 
 ## Setup
 
-1. **Schema** — run [`../../schema.sql`](../../schema.sql) in the Supabase SQL
-   Editor (creates the `expenses` table + storage bucket).
-2. **Secret** — set a long random bearer token:
+1. **Schema**: run [`../../schema-fresh.sql`](../../schema-fresh.sql) in the
+   Supabase SQL Editor (creates the `expenses` table + storage bucket).
+2. **Secret**: give each person their own long random token, mapped to their
+   login email (or auth user id), as `token:email` pairs separated by commas:
    ```bash
-   openssl rand -hex 32
-   supabase secrets set AGENT_API_TOKEN=<that value> --project-ref <ref>
+   T1=$(openssl rand -hex 32); T2=$(openssl rand -hex 32)
+   echo "you: $T1"; echo "partner: $T2"   # save these: Supabase can't show them again
+   supabase secrets set AGENT_TOKENS="$T1:you@example.com,$T2:partner@example.com" \
+     --project-ref <ref>
    ```
    `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are injected automatically.
+   The older single-user form, `EXPENSE_AGENT_TOKEN` (or `AGENT_API_TOKEN`) plus
+   `AGENT_USER_ID`, is still honored and merged in as one more entry.
 3. **Deploy with JWT verification OFF** (we use our own bearer token):
    ```bash
    supabase functions deploy agent-api --no-verify-jwt --project-ref <ref>
@@ -25,8 +30,12 @@ A bearer-token-protected HTTP API over the `expenses` table, so an AI assistant
 
 ## Auth
 
-Every request must send `Authorization: Bearer <AGENT_API_TOKEN>`.
+Every request must send `Authorization: Bearer <token>`.
 Missing/incorrect → `401`.
+
+The token decides **whose** expenses the request can see and change. Every
+query is scoped to that token's user, so one person's token can't read, edit,
+or delete the other's expenses (another user's expense id returns `404`).
 
 ## Endpoints
 
@@ -65,7 +74,7 @@ Base: `https://<project>.supabase.co/functions/v1/agent-api`
 Log an expense:
 ```bash
 curl -X POST "https://<project>.supabase.co/functions/v1/agent-api/expenses" \
-  -H "Authorization: Bearer $AGENT_API_TOKEN" \
+  -H "Authorization: Bearer $MY_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"merchant":"Shell","amount":54.10,"category":"Gas","date":"2026-10-31","note":"gallons: 12.3"}'
 ```
@@ -73,7 +82,7 @@ curl -X POST "https://<project>.supabase.co/functions/v1/agent-api/expenses" \
 This month's breakdown:
 ```bash
 curl "https://<project>.supabase.co/functions/v1/agent-api/expenses/summary?month=2026-10" \
-  -H "Authorization: Bearer $AGENT_API_TOKEN"
+  -H "Authorization: Bearer $MY_TOKEN"
 ```
 
 ## Notes
@@ -81,5 +90,6 @@ curl "https://<project>.supabase.co/functions/v1/agent-api/expenses/summary?mont
 - Deletes are **hard** (the row is removed). There's no soft-delete here.
 - The function uses the service_role key, so it bypasses Row Level Security —
   the bearer token is the only thing standing between the world and your data.
-  **Keep `AGENT_API_TOKEN` secret**, and rotate it with `supabase secrets set`
-  if it ever leaks.
+  **Keep each token secret.** If one leaks, replace just that entry in
+  `AGENT_TOKENS` with a new token (`supabase secrets set`), then update that
+  person's Muse.
