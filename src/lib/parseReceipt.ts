@@ -1,6 +1,7 @@
 import { Platform } from "react-native";
 import * as FileSystem from "expo-file-system/legacy";
 import { supabase, isSupabaseConfigured } from "./supabase";
+import { getReceiptPhotoUrl } from "./storage";
 
 /** The subset of an expense the receipt parser returns. */
 export interface ParsedReceipt {
@@ -61,7 +62,10 @@ export async function parseReceiptImage(
   }
   if (!imageUri) throw new Error("Add a receipt photo first");
 
-  const image = await toDataUrl(imageUri);
+  // Saved photos live in a private bucket — hand the scanner a signed URL.
+  const readable = await getReceiptPhotoUrl(imageUri);
+  if (!readable) throw new Error("Could not load the receipt photo");
+  const image = await toDataUrl(readable);
 
   const { data, error } = await supabase.functions.invoke("parse-receipt", {
     body: { image },

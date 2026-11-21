@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Platform } from "react-native";
 import { decode } from "base64-arraybuffer";
 import * as FileSystem from "expo-file-system/legacy";
@@ -30,7 +31,85 @@ function extAndType(uri: string): { ext: string; contentType: string } {
 }
 
 /**
- * Upload a local receipt image to Supabase Storage and return its public URL.
+ * The bucket is PRIVATE. `photo_url` keeps the object's canonical URL
+ * (".../object/public/receipt-photos/<path>") purely as a stable identifier —
+ * it no longer opens on its own. To display or scan a photo, turn it into a
+ * short-lived signed URL with `getReceiptPhotoUrl` / `useReceiptPhotoUri`.
+ */
+
+/** Extract the object path from one of our bucket URLs, or null if it isn't one. */
+export function storagePathFromUrl(photoUrl: string | null): string | null {
+  if (!photoUrl || isLocalPhoto(photoUrl)) return null;
+  const marker = `/${PHOTO_BUCKET}/`;
+  const idx = photoUrl.indexOf(marker);
+  if (idx === -1) return null;
+  const path = photoUrl.slice(idx + marker.length).split("?")[0];
+  return path ? decodeURIComponent(path) : null;
+}
+
+const SIGNED_URL_TTL_SECONDS = 60 * 60; // 1 hour
+const signedCache = new Map<string, { url: string; expiresAt: number }>();
+
+/**
+ * Resolve a stored photo reference to something an <Image> (or the receipt
+ * scanner) can load. Local URIs and non-bucket URLs are returned unchanged;
+ * bucket photos get a cached signed URL. Returns null if signing fails
+ * (e.g. the photo isn't yours).
+ */
+export async function getReceiptPhotoUrl(
+  photoUrl: string | null
+): Promise<string | null> {
+  if (!photoUrl) return null;
+  const path = storagePathFromUrl(photoUrl);
+  if (!path || !isSupabaseConfigured || !supabase) return photoUrl;
+
+  const cached = signedCache.get(path);
+  // Reuse until 5 minutes before expiry.
+  if (cached && cached.expiresAt - Date.now() > 5 * 60 * 1000) return cached.url;
+
+  const { data, error } = await supabase.storage
+    .from(PHOTO_BUCKET)
+    .createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
+  if (error || !data?.signedUrl) {
+    console.warn("Could not sign receipt photo URL:", error?.message);
+    return null;
+  }
+  signedCache.set(path, {
+    url: data.signedUrl,
+    expiresAt: Date.now() + SIGNED_URL_TTL_SECONDS * 1000,
+  });
+  return data.signedUrl;
+}
+
+/** Hook form of `getReceiptPhotoUrl` for rendering. `loading` is true while signing. */
+export function useReceiptPhotoUri(photoUrl: string | null): {
+  uri: string | null;
+  loading: boolean;
+} {
+  const needsSigning = !!storagePathFromUrl(photoUrl) && isSupabaseConfigured;
+  const [state, setState] = useState<{ for: string | null; uri: string | null }>(
+    { for: null, uri: null }
+  );
+
+  useEffect(() => {
+    if (!needsSigning) return;
+    let cancelled = false;
+    void getReceiptPhotoUrl(photoUrl).then((uri) => {
+      if (!cancelled) setState({ for: photoUrl, uri });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [photoUrl, needsSigning]);
+
+  if (!needsSigning) return { uri: photoUrl, loading: false };
+  if (state.for !== photoUrl) return { uri: null, loading: true };
+  return { uri: state.uri, loading: false };
+}
+
+/**
+ * Upload a local receipt image to Supabase Storage and return its canonical
+ * bucket URL (an identifier — see `getReceiptPhotoUrl` to display it).
  * Works on both web (Blob) and native (base64 -> ArrayBuffer).
  *
  * Throws if Supabase isn't configured — callers should guard with
@@ -75,12 +154,9 @@ export async function uploadReceiptPhoto(localUri: string): Promise<string> {
 export async function deleteReceiptPhoto(photoUrl: string | null): Promise<void> {
   if (!isSupabaseConfigured || !supabase || !photoUrl) return;
 
-  const marker = `/${PHOTO_BUCKET}/`;
-  const idx = photoUrl.indexOf(marker);
-  if (idx === -1) return; // not in our bucket
-
-  const path = photoUrl.slice(idx + marker.length);
-  if (!path) return;
+  const path = storagePathFromUrl(photoUrl);
+  if (!path) return; // not in our bucket
+  signedCache.delete(path);
 
   const { error } = await supabase.storage.from(PHOTO_BUCKET).remove([path]);
   if (error) console.warn("Failed to delete old receipt photo:", error.message);

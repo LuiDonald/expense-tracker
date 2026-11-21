@@ -22,7 +22,7 @@ import { isSupabaseConfigured } from "../../src/lib/supabase";
 import { useAuth } from "../../src/lib/auth";
 import { parseReceiptImage } from "../../src/lib/parseReceipt";
 import { alertDialog } from "../../src/lib/dialogs";
-import { isLocalPhoto } from "../../src/lib/storage";
+import { isLocalPhoto, useReceiptPhotoUri } from "../../src/lib/storage";
 import { colors, maxContentWidth, radius, spacing } from "../../src/lib/theme";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -63,6 +63,9 @@ export default function EditExpenseScreen() {
   );
   const [saving, setSaving] = useState(false);
   const [scanning, setScanning] = useState(false);
+  const { uri: photoUri, loading: photoLoading } = useReceiptPhotoUri(
+    draft.photoUrl
+  );
 
   const patch = (p: Partial<ExpenseDraft>) => setDraft((d) => ({ ...d, ...p }));
 
@@ -176,8 +179,14 @@ export default function EditExpenseScreen() {
       />
       <ScrollView contentContainerStyle={styles.content}>
         {/* Receipt photo + scan */}
-        {draft.photoUrl ? (
-          <Image source={{ uri: draft.photoUrl }} style={styles.photo} />
+        {draft.photoUrl && photoUri ? (
+          <Image source={{ uri: photoUri }} style={styles.photo} />
+        ) : draft.photoUrl ? (
+          <View style={[styles.photo, styles.photoPlaceholder]}>
+            <Text style={styles.muted}>
+              {photoLoading ? "Loading photo…" : "Couldn't load the receipt photo"}
+            </Text>
+          </View>
         ) : (
           <View style={[styles.photo, styles.photoPlaceholder]}>
             <Text style={styles.muted}>No receipt photo yet</Text>

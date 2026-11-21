@@ -12,6 +12,10 @@ picks who they are, unlocks with **their own passcode**, and sees **only their
 own expenses** — enforced by Supabase Row Level Security (not just hidden
 buttons). A correct passcode mints that user's real session.
 
+Receipt photos are private too. The storage bucket isn't public, each person
+can open only their own receipts, and the app shows them through short-lived
+signed URLs.
+
 ## Features
 
 - 🧾 **Expenses by month** — a month switcher, the month's total, and expenses
@@ -58,6 +62,7 @@ src/
 supabase/
   schema-fresh.sql        # ⭐ Full multi-user schema for a new project (run this one)
   schema-multiuser.sql    # One-time migration: single-owner -> per-user (already applied)
+  schema-private-photos.sql # One-time migration: make receipt photos private
   schema.sql              # Historical: original single-owner table + bucket
   schema-passcode.sql     # Historical: single-owner app_lock passcode store
   schema-open.sql         # TEMP: open everything up for login-less testing (see caveat)
@@ -141,13 +146,15 @@ EXPO_PUBLIC_APP_USERS=you@example.com:You,partner@example.com:Partner
 
 In **SQL Editor → New query**, run
 [`supabase/schema-fresh.sql`](supabase/schema-fresh.sql). In one go it creates
-the `expenses` table with per-user RLS, the `receipt-photos` bucket and its
-policies, and the `user_passcode` store. If you fork this, edit the email list
+the `expenses` table with per-user RLS, the private `receipt-photos` bucket and
+its policies, and the `user_passcode` store. If you fork this, edit the email list
 in the storage policies first (lowercase).
 
 The other `.sql` files are history: `schema.sql` → `schema-passcode.sql` →
 `schema-multiuser.sql` is how the original shared project got here. Don't run
-them on a new project.
+them on a new project. An existing project set up before photos went private
+needs [`supabase/schema-private-photos.sql`](supabase/schema-private-photos.sql)
+run once.
 
 Also make sure each user exists (**Authentication → Users**), email sign-in is
 enabled, new sign-ups are disabled, and your app URL is in **Authentication →

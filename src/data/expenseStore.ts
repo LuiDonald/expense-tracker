@@ -196,8 +196,8 @@ class ExpenseStore {
 
   /**
    * When Supabase is configured, upload any local (not-yet-uploaded) receipt
-   * photo and return a draft whose photoUrl is a public Storage URL. In demo
-   * mode the local URI is kept as-is (persists for the session only).
+   * photo and return a draft whose photoUrl is its bucket URL (private; shown
+   * via signed URLs). In demo mode the local URI is kept as-is (persists for the session only).
    */
   private async withUploadedPhoto(draft: ExpenseDraft): Promise<ExpenseDraft> {
     if (isSupabaseConfigured && draft.photoUrl && isLocalPhoto(draft.photoUrl)) {

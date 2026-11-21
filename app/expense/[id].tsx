@@ -13,7 +13,16 @@ import { iconForCategory } from "../../src/data/categories";
 import { useAuth } from "../../src/lib/auth";
 import { confirmDialog, alertDialog } from "../../src/lib/dialogs";
 import { formatCurrency, formatDate } from "../../src/lib/format";
+import { useReceiptPhotoUri } from "../../src/lib/storage";
 import { colors, maxContentWidth, radius, spacing } from "../../src/lib/theme";
+
+/** Shows a receipt from the private bucket via a short-lived signed URL. */
+function ReceiptPhoto({ photoUrl, style }: { photoUrl: string; style: any }) {
+  const { uri, loading } = useReceiptPhotoUri(photoUrl);
+  if (loading) return <ActivityIndicator style={{ marginVertical: spacing.md }} />;
+  if (!uri) return <Text style={styles.muted}>Couldn't load the receipt photo.</Text>;
+  return <Image source={{ uri }} style={style} />;
+}
 
 export default function ExpenseDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -99,7 +108,7 @@ export default function ExpenseDetailScreen() {
       <View style={styles.section}>
         <Text style={styles.heading}>Receipt</Text>
         {expense.photoUrl ? (
-          <Image source={{ uri: expense.photoUrl }} style={styles.receipt} />
+          <ReceiptPhoto photoUrl={expense.photoUrl} style={styles.receipt} />
         ) : (
           <Text style={styles.muted}>No receipt photo attached.</Text>
         )}

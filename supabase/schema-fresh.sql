@@ -52,13 +52,26 @@ create trigger expenses_touch_updated_at
   before update on public.expenses
   for each row execute function public.expenses_set_updated_at();
 
--- --- receipt photos bucket (public read, both users may write) -------------
+-- --- receipt photos bucket (PRIVATE; app reads via signed URLs) -----------
 insert into storage.buckets (id, name, public)
-  values ('receipt-photos', 'receipt-photos', true)
+  values ('receipt-photos', 'receipt-photos', false)
   on conflict (id) do nothing;
 
-create policy "public read receipt photos"
-  on storage.objects for select using (bucket_id = 'receipt-photos');
+-- Read: only photos you uploaded, or ones attached to your own expenses.
+create policy "users read own receipt photos"
+  on storage.objects for select to authenticated
+  using (
+    bucket_id = 'receipt-photos'
+    and (
+      owner_id = (select auth.uid())::text
+      or exists (
+        select 1 from public.expenses e
+        where e.user_id = (select auth.uid())
+          and right(e.photo_url, length('/receipt-photos/' || objects.name))
+              = '/receipt-photos/' || objects.name
+      )
+    )
+  );
 create policy "users insert receipt photos"
   on storage.objects for insert to authenticated
   with check (bucket_id = 'receipt-photos'
