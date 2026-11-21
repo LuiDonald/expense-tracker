@@ -18,6 +18,24 @@ export async function pickImageFromLibrary(): Promise<string | null> {
 }
 
 /**
+ * Pick several receipt photos at once (Android, iOS 14+, web).
+ * Returns local URIs in the order given, or [] if cancelled.
+ */
+export async function pickImagesFromLibrary(): Promise<string[]> {
+  const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+  if (!permission.granted) return [];
+
+  const result = await ImagePicker.launchImageLibraryAsync({
+    mediaTypes: ["images"],
+    allowsMultipleSelection: true,
+    quality: 0.8,
+  });
+
+  if (result.canceled || !result.assets?.length) return [];
+  return result.assets.map((a) => a.uri);
+}
+
+/**
  * Open the camera to snap a new receipt photo. Returns a local URI, or null.
  */
 export async function takePhoto(): Promise<string | null> {

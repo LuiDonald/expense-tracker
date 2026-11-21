@@ -63,6 +63,11 @@ Return ONLY a JSON object with EXACTLY these keys:
 
 Rules:
 - "amount" is a number like 42.19 (no "$", no commas). Pick the final total paid.
+- Choosing the total when several numbers appear: use the amount actually charged ("Total", "Amount Due", "Card Charged", "Balance Paid"). Never use a subtotal, the cash tendered, the change given back, "You saved", or a points/rewards balance.
+- Tips (restaurants, bars, delivery, taxis): if a tip and/or final total is HANDWRITTEN, use the handwritten final total (if only a handwritten tip is legible, add it to the printed total). If the tip line is BLANK (e.g. a pre-tip copy), use the printed total and put "tip not included" in "note". If a tip is printed or included, the total already covers it.
+- Itemized receipts: keep "note" to a few words naming the main items when helpful (e.g. "milk, eggs, bread"), max ~6 words. Don't list prices.
+- If the photo shows MORE THAN ONE receipt, extract only the most prominent/complete one and put "multiple receipts in photo" in "note".
+- If the total is cut off, blurry, or ambiguous, still give your best reading but add "check amount" to "note".
 - For a gas receipt, "merchant" is the station brand (Shell, Chevron, etc.), category is "Gas", and you may put gallons/price-per-gallon in "note".
 - "category" MUST be one of: ${CATEGORIES.join(", ")}.
 - If the image clearly isn't a receipt/sale, return the shape with empty/zero values.

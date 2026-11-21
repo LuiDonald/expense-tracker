@@ -45,6 +45,10 @@ export default function RootLayout() {
             name="edit/[id]"
             options={{ title: "Edit Expense", presentation: "modal" }}
           />
+          <Stack.Screen
+            name="scan"
+            options={{ title: "Scan receipts", presentation: "modal" }}
+          />
         </Stack>
         <DialogHost />
       </SafeAreaProvider>

@@ -21,7 +21,9 @@ import {
 import { isSupabaseConfigured } from "../../src/lib/supabase";
 import { useAuth } from "../../src/lib/auth";
 import { parseReceiptImage } from "../../src/lib/parseReceipt";
-import { alertDialog } from "../../src/lib/dialogs";
+import { alertDialog, confirmDialog } from "../../src/lib/dialogs";
+import { findLikelyDuplicates } from "../../src/data/duplicates";
+import { formatCurrency, formatDate } from "../../src/lib/format";
 import { isLocalPhoto, useReceiptPhotoUri } from "../../src/lib/storage";
 import { colors, maxContentWidth, radius, spacing } from "../../src/lib/theme";
 
@@ -137,6 +139,22 @@ export default function EditExpenseScreen() {
       alertDialog("Check the date", "Use the format YYYY-MM-DD (e.g. 2026-10-31).");
       return;
     }
+    // Warn before saving what looks like the same purchase twice.
+    const dupes = findLikelyDuplicates(
+      expenseStore.getAll(),
+      { merchant, amount, date: draft.date },
+      isNew ? undefined : id
+    );
+    if (dupes.length > 0) {
+      const d = dupes[0].expense;
+      const more = dupes.length > 1 ? ` (and ${dupes.length - 1} more)` : "";
+      const ok = await confirmDialog(
+        "Possible duplicate",
+        `You already have ${d.merchant || "an expense"} for ${formatCurrency(d.amount)} on ${formatDate(d.date)}${more}. Save this one anyway?`,
+        { confirmText: "Save anyway", cancelText: "Go back" }
+      );
+      if (!ok) return;
+    }
     setSaving(true);
     try {
       const cleaned: ExpenseDraft = {
@@ -200,6 +218,15 @@ export default function EditExpenseScreen() {
             <Text style={styles.secondaryBtnText}>Take photo</Text>
           </Pressable>
         </View>
+        {isNew && (
+          <Pressable
+            onPress={() => router.replace("/scan")}
+            style={styles.batchLink}
+            accessibilityRole="link"
+          >
+            <Text style={styles.batchLinkText}>Have several receipts? Scan them all at once →</Text>
+          </Pressable>
+        )}
 
         {isSupabaseConfigured && (
           <View style={styles.scanCard}>
@@ -354,6 +381,8 @@ const styles = StyleSheet.create({
   },
   photoPlaceholder: { alignItems: "center", justifyContent: "center" },
   photoActions: { flexDirection: "row", gap: spacing.md },
+  batchLink: { alignSelf: "center", paddingVertical: spacing.xs },
+  batchLinkText: { color: colors.primary, fontSize: 14, fontWeight: "600" },
   secondaryBtn: {
     flex: 1,
     paddingVertical: spacing.md,

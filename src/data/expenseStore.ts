@@ -227,7 +227,7 @@ class ExpenseStore {
     // mock mode
     const expense: Expense = {
       ...prepared,
-      id: `local-${Date.now()}`,
+      id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       createdAt: now,
       updatedAt: now,
     };
