@@ -1,7 +1,8 @@
 -- ===========================================================================
 -- PASSCODE MODE — re-lock the app to owner-only + add the passcode store.
 -- ===========================================================================
--- Run this to move from "open mode" back to a secured app. The app is unlocked
+-- HISTORICAL (single-owner era) — superseded by schema-fresh.sql; do not run
+-- on the current multi-user project. The app is unlocked
 -- by a passcode, which mints a real owner session, so the data is protected by
 -- owner-only Row Level Security again. The passcode itself lives in app_lock,
 -- which ONLY the edge function (service role) can touch.

@@ -10,7 +10,7 @@ import { useRouter } from "expo-router";
 import { useExpenses, expenseStore } from "../../src/data/expenseStore";
 import { iconForCategory } from "../../src/data/categories";
 import { isSupabaseConfigured } from "../../src/lib/supabase";
-import { useAuth, REQUIRE_LOGIN } from "../../src/lib/auth";
+import { useAuth } from "../../src/lib/auth";
 import { formatCurrency } from "../../src/lib/format";
 import { colors, maxContentWidth, radius, spacing } from "../../src/lib/theme";
 import { Locked } from "../../src/components/Locked";
@@ -20,7 +20,7 @@ export default function CategoriesScreen() {
   const { expenses } = useExpenses();
   const { isOwner, ready } = useAuth();
 
-  const locked = REQUIRE_LOGIN && isSupabaseConfigured && ready && !isOwner;
+  const locked = isSupabaseConfigured && ready && !isOwner;
 
   const totals = useMemo(() => expenseStore.allCategoryTotals(), [expenses]);
   const grandTotal = useMemo(

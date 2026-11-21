@@ -9,7 +9,7 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { useAuth, sendMagicLink, REQUIRE_LOGIN } from "../lib/auth";
+import { useAuth, sendMagicLink } from "../lib/auth";
 import { isSupabaseConfigured } from "../lib/supabase";
 import {
   getPasscodeStatus,
@@ -41,11 +41,11 @@ export function LockGate({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (REQUIRE_LOGIN && isSupabaseConfigured) refresh();
+    if (isSupabaseConfigured) refresh();
   }, [refresh, isOwner]);
 
   // Open testing mode, or no backend — no gate.
-  if (!REQUIRE_LOGIN || !isSupabaseConfigured) return <>{children}</>;
+  if (!isSupabaseConfigured) return <>{children}</>;
 
   if (!ready || (!users && !failed)) return <Splash />;
   if (failed || !users) return <ErrorState onRetry={refresh} />;

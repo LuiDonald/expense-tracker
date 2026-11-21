@@ -65,7 +65,6 @@ supabase/
   schema-private-photos.sql # One-time migration: make receipt photos private
   schema.sql              # Historical: original single-owner table + bucket
   schema-passcode.sql     # Historical: single-owner app_lock passcode store
-  schema-open.sql         # TEMP: open everything up for login-less testing (see caveat)
   functions/parse-receipt # Edge fn: receipt photo -> expense fields (in-app Scan)
   functions/agent-api     # Edge fn: bearer-token CRUD so Muse can log
   functions/passcode      # Edge fn: passcode status / set / verify (mints owner session)
@@ -172,7 +171,7 @@ supabase secrets set OPENAI_API_KEY=<key> \
   --project-ref $REF
 
 # receipt scanning (owner-gated); uses gpt-4o-mini via RECEIPT_MODEL
-supabase secrets set REQUIRE_OWNER=true RECEIPT_MODEL=gpt-4o-mini --project-ref $REF
+supabase secrets set RECEIPT_MODEL=gpt-4o-mini --project-ref $REF
 supabase functions deploy parse-receipt --project-ref $REF --no-verify-jwt
 
 # passcode gate
@@ -209,8 +208,8 @@ in merchant / amount / date / category for you to review.
 - `RECEIPT_MODEL` secret — the model receipts use (defaults to `gpt-4o-mini`;
   kept separate from Recipe's shared `OPENAI_MODEL` so the two apps don't affect
   each other).
-- `REQUIRE_OWNER` secret — `true` requires a signed-in owner (normal); set
-  `false` only for open testing.
+- Scanning always requires a signed-in user from `OWNER_USERS`, so random
+  visitors can't run up your OpenAI bill.
 
 ## Let Muse log expenses (agent-api)
 
@@ -242,26 +241,11 @@ See [`supabase/functions/agent-api/README.md`](supabase/functions/agent-api/READ
 for full details. Muse's API bypasses RLS via the service role, so it keeps
 working regardless of the passcode lock.
 
-## Open mode vs. locked (toggles)
+## Trying the app without a backend
 
-For quick testing you can run the app with **no login** at all, then re-lock it.
-Each layer has one switch:
-
-| | Open (testing) | Locked (passcode) |
-|---|---|---|
-| App | `REQUIRE_LOGIN = false` in `src/lib/auth.ts` | `REQUIRE_LOGIN = true` |
-| Database | run `supabase/schema-open.sql` | drop the `open …` policies it added |
-| Receipt scan | `REQUIRE_OWNER=false` secret | `REQUIRE_OWNER=true` secret |
-
-After flipping the app flag, rebuild + redeploy the web front-end. ⚠️ In open
-mode anyone with the URL can read/write your expenses and trigger paid OpenAI
-scans — use it only briefly.
-
-⚠️ **Not updated for multi-user.** `schema-open.sql` predates per-user
-expenses. `expenses.user_id` is now required and defaults to `auth.uid()`, so
-inserts without a login fail. Its `open …` policies would also let each user
-see the other's expenses. Don't use `schema-passcode.sql` to re-lock either:
-it restores the old single-owner setup.
+There's no login-free mode against the real database. To try the UI, run
+`npm start` without a `.env`: the app uses in-memory sample data and skips the
+passcode screen (see [Run in demo mode](#2-run-in-demo-mode-no-backend-needed)).
 
 ## Refining categories later
 

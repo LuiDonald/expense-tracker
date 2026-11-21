@@ -12,7 +12,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useExpenses, expenseStore } from "../../src/data/expenseStore";
 import { iconForCategory } from "../../src/data/categories";
 import { isSupabaseConfigured } from "../../src/lib/supabase";
-import { useAuth, REQUIRE_LOGIN } from "../../src/lib/auth";
+import { useAuth } from "../../src/lib/auth";
 import {
   currentMonthKey,
   formatCurrency,
@@ -33,7 +33,7 @@ export default function ExpensesScreen() {
 
   // Gate: when Supabase is configured, nothing is visible until the owner logs
   // in. (In demo mode we show the sample data freely.)
-  const locked = REQUIRE_LOGIN && isSupabaseConfigured && ready && !isOwner;
+  const locked = isSupabaseConfigured && ready && !isOwner;
 
   const groups = useMemo(
     () => expenseStore.categoryGroups(month),

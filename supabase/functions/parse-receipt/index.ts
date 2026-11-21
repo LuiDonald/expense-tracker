@@ -76,13 +76,8 @@ Deno.serve(async (req: Request) => {
     return json({ error: "Method not allowed" }, 405);
   }
 
-  // --- Auth: require the signed-in owner ---
-  // TEMPORARY: set the REQUIRE_OWNER secret to "false" to open scanning up for
-  // testing (no login needed). Set it back to "true" (or unset it) to re-lock.
-  const requireOwner =
-    (Deno.env.get("REQUIRE_OWNER") ?? "true").toLowerCase().trim() !== "false";
-
-  if (requireOwner) {
+  // --- Auth: require a signed-in allowed user (always on) ---
+  {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     // Allowed emails: OWNER_USERS ("email:Name,email2:Name2") or OWNER_EMAIL.

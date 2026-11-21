@@ -45,14 +45,6 @@ const ALLOWED_EMAILS = new Set(appUsers.map((u) => u.email));
 /** The first allowed email (kept for backwards-compatible call sites). */
 export const ownerEmail = appUsers[0]?.email ?? "";
 
-/**
- * When true, the app is locked behind the passcode gate (see components/Lock).
- * A correct passcode mints a real owner session, so the database is protected
- * by owner-only RLS. Set to `false` only for temporary open testing (also
- * requires relaxing RLS via supabase/schema-open.sql).
- */
-export const REQUIRE_LOGIN = true;
-
 // Tiny shared auth store so every screen sees the same session.
 let currentSession: Session | null = null;
 let initialized = false;
