@@ -13,6 +13,7 @@ import {
 } from "../../src/lib/format";
 import { colors, maxContentWidth, radius, spacing } from "../../src/lib/theme";
 import { Locked } from "../../src/components/Locked";
+import { compareMonths, describeChange } from "../../src/data/compare";
 
 export default function InsightsScreen() {
   const insets = useSafeAreaInsets();
@@ -32,6 +33,13 @@ export default function InsightsScreen() {
   );
   const allMonths = useMemo(() => expenseStore.groupedByMonth(), [expenses]);
   const maxCat = catTotals.length ? catTotals[0].total : 0;
+  const comparison = useMemo(() => compareMonths(expenses, month), [expenses, month]);
+  const prevLabel = shortMonth(comparison.previousMonth);
+  const prevRange =
+    comparison.throughDay !== null
+      ? `${prevLabel} 1–${comparison.throughDay}`
+      : prevLabel;
+  const movers = comparison.categories.filter((c) => Math.abs(c.delta) >= 0.005).slice(0, 3);
 
   if (locked) return <Locked />;
 
@@ -68,7 +76,45 @@ export default function InsightsScreen() {
         </Pressable>
       </View>
       <Text style={styles.total}>{formatCurrency(monthTotal)}</Text>
-      <Text style={styles.totalCaption}>Total spent in {monthLabel(month)}</Text>
+      <Text style={styles.totalCaption}>
+        Total spent in {monthLabel(month)}
+        {comparison.throughDay !== null ? " so far" : ""}
+      </Text>
+      {(comparison.current > 0 || comparison.previous > 0) && (
+        <ChangePill
+          delta={comparison.delta}
+          pct={comparison.pct}
+          suffix={
+            comparison.previous > 0
+              ? `vs ${prevRange} (${formatCurrency(comparison.previous)})`
+              : `nothing recorded in ${prevRange}`
+          }
+        />
+      )}
+
+      {/* Biggest changes vs last month */}
+      {movers.length > 0 && comparison.previous > 0 && (
+        <>
+          <Text style={styles.sectionTitle}>Biggest changes vs {prevRange}</Text>
+          <View style={styles.card}>
+            {movers.map((c) => (
+              <View key={c.category} style={styles.moverRow}>
+                <Text style={styles.catName} numberOfLines={1}>
+                  {iconForCategory(c.category)}  {c.category}
+                </Text>
+                <View style={styles.moverRight}>
+                  <Text style={[styles.moverChange, changeColor(c.delta)]}>
+                    {describeChange(c.delta, c.pct, formatCurrency)}
+                  </Text>
+                  <Text style={styles.catMeta}>
+                    {formatCurrency(c.previous)} → {formatCurrency(c.current)}
+                  </Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        </>
+      )}
 
       {/* Category breakdown */}
       <Text style={styles.sectionTitle}>By category</Text>
@@ -129,6 +175,41 @@ export default function InsightsScreen() {
         </View>
       )}
     </ScrollView>
+  );
+}
+
+/** "Nov 2026" -> "Nov". */
+function shortMonth(key: string): string {
+  return monthLabel(key).slice(0, 3);
+}
+
+/** Spending more is shown in red, spending less in green. */
+function changeColor(delta: number) {
+  if (Math.abs(delta) < 0.005) return { color: colors.textMuted };
+  return { color: delta > 0 ? colors.danger : colors.success };
+}
+
+function ChangePill({
+  delta,
+  pct,
+  suffix,
+}: {
+  delta: number;
+  pct: number | null;
+  suffix: string;
+}) {
+  const arrow = Math.abs(delta) < 0.005 ? "＝" : delta > 0 ? "▲" : "▼";
+  const head =
+    pct === null
+      ? ""
+      : Math.abs(delta) < 0.005
+        ? "Same "
+        : `${arrow} ${Math.abs(pct).toFixed(0)}% `;
+  return (
+    <Text style={styles.pill}>
+      <Text style={[styles.pillStrong, changeColor(delta)]}>{head}</Text>
+      <Text style={styles.pillText}>{suffix}</Text>
+    </Text>
   );
 }
 
@@ -219,6 +300,17 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
   },
   catMeta: { fontSize: 12, color: colors.textMuted },
+  pill: { textAlign: "center", fontSize: 13, marginTop: spacing.xs },
+  pillStrong: { fontWeight: "700" },
+  pillText: { color: colors.textMuted },
+  moverRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: spacing.md,
+  },
+  moverRight: { alignItems: "flex-end", gap: 2, flexShrink: 1 },
+  moverChange: { fontSize: 14, fontWeight: "700" },
   muted: { color: colors.textMuted, fontSize: 14 },
   monthItem: {
     flexDirection: "row",

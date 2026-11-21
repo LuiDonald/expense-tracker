@@ -7,6 +7,7 @@ export const colors = {
   primarySoft: "#FFE8D9",
   border: "#ECE6DE",
   danger: "#C92A2A",
+  success: "#2B8A3E",
 };
 
 export const spacing = {
