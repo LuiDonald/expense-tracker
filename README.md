@@ -187,11 +187,16 @@ supabase functions deploy agent-api --project-ref $REF --no-verify-jwt
 ### 6. Run / deploy the front-end
 
 ```bash
-npm start                                   # local dev
-# or publish the web build to EAS Hosting:
-npx expo export --platform web
-npx eas-cli deploy --prod
+npm start                                   # local dev (reads .env)
+# publish the web build to EAS Hosting:
+npm run deploy:web
 ```
+
+`deploy:web` builds with the `EXPO_PUBLIC_*` values stored in the EAS
+**production** environment (`eas env:exec`), so it works even without a local
+`.env`. These values are baked in at build time: a build that has no Supabase
+settings silently falls back to demo mode. To change one, run
+`npx eas-cli env:update --environment production`.
 
 The deployed app lives at **https://luidonalds-team-expense.expo.app**.
 

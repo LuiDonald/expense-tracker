@@ -31,7 +31,9 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "build:web": "npx eas-cli env:exec production 'npx expo export --platform web --clear'",
+    "deploy:web": "npm run build:web && npx eas-cli deploy --prod"
   },
   "private": true
 }
