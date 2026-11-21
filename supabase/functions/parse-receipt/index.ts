@@ -20,21 +20,8 @@
 //   supabase functions deploy parse-receipt --project-ref <ref>
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { CATEGORY_NAMES, canonicalCategory } from "../_shared/categories.ts";
 
-// Keep this list in sync with src/data/categories.ts.
-const CATEGORIES = [
-  "Groceries",
-  "Car",
-  "Gas",
-  "Shopping",
-  "Dining",
-  "Utilities",
-  "Health",
-  "Home",
-  "Entertainment",
-  "Travel",
-  "Other",
-];
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -69,7 +56,7 @@ Rules:
 - If the photo shows MORE THAN ONE receipt, extract only the most prominent/complete one and put "multiple receipts in photo" in "note".
 - If the total is cut off, blurry, or ambiguous, still give your best reading but add "check amount" to "note".
 - For a gas receipt, "merchant" is the station brand (Shell, Chevron, etc.), category is "Gas", and you may put gallons/price-per-gallon in "note".
-- "category" MUST be one of: ${CATEGORIES.join(", ")}.
+- "category" MUST be one of: ${CATEGORY_NAMES.join(", ")}.
 - If the image clearly isn't a receipt/sale, return the shape with empty/zero values.
 - Output JSON only — no commentary.`;
 
@@ -185,8 +172,7 @@ Deno.serve(async (req: Request) => {
       : parseFloat(String(rawAmount ?? "").replace(/[^0-9.]/g, "")) || 0;
 
   const rawCategory = asStr(parsed.category);
-  const category =
-    CATEGORIES.find((c) => c.toLowerCase() === rawCategory.toLowerCase()) ?? "";
+  const category = canonicalCategory(rawCategory) ?? "";
 
   const rawDate = asStr(parsed.date);
   const date = /^\d{4}-\d{2}-\d{2}$/.test(rawDate) ? rawDate : "";

@@ -75,6 +75,7 @@ supabase/
   schema-private-photos.sql # One-time migration: make receipt photos private
   schema.sql              # Historical: original single-owner table + bucket
   schema-passcode.sql     # Historical: single-owner app_lock passcode store
+  functions/_shared       # Code shared by the functions AND the app (category list)
   functions/parse-receipt # Edge fn: receipt photo -> expense fields (in-app Scan)
   functions/agent-api     # Edge fn: bearer-token CRUD so Muse can log
   functions/passcode      # Edge fn: passcode status / set / verify (mints owner session)
@@ -266,7 +267,15 @@ passcode screen (see [Run in demo mode](#2-run-in-demo-mode-no-backend-needed)).
 
 ## Refining categories later
 
-Edit the one list in [`src/data/categories.ts`](src/data/categories.ts) (name +
-emoji). The `parse-receipt` and `agent-api` functions keep a matching list —
-update those two arrays too so AI/agent suggestions stay in sync. Custom
-categories not in the list still work; they just fall back to the 📁 icon.
+There's **one** category list (name + emoji):
+[`supabase/functions/_shared/categories.ts`](supabase/functions/_shared/categories.ts).
+The app, the receipt scanner (`parse-receipt`) and Muse's API (`agent-api`) all
+read it, so they can't drift apart. After editing it, redeploy all three:
+
+```bash
+npm run deploy:web
+npx supabase functions deploy parse-receipt agent-api --remote=iidnjpxkgtrctoqfukew --no-verify-jwt --use-api
+```
+
+Categories not in the list still work (Muse can set a custom one, and existing
+expenses keep theirs); they just show the 📁 icon.

@@ -33,6 +33,7 @@
 //   DELETE /expenses/:id                                            delete an expense
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { canonicalCategory } from "../_shared/categories.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -79,12 +80,6 @@ function ownerForToken(token: string): string | null {
   return found;
 }
 
-// Keep this list in sync with src/data/categories.ts. New categories are still
-// accepted (you said you'd refine them) — this is just the known set.
-const CATEGORIES = [
-  "Groceries", "Car", "Gas", "Shopping", "Dining",
-  "Utilities", "Health", "Home", "Entertainment", "Travel", "Other",
-];
 
 const db = createClient(SUPABASE_URL, SERVICE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
@@ -178,8 +173,7 @@ function normalizeCategory(raw?: string): string | undefined {
   if (raw === undefined) return undefined;
   const t = raw.trim();
   if (!t) return "";
-  const match = CATEGORIES.find((c) => c.toLowerCase() === t.toLowerCase());
-  return match ?? t; // allow custom categories through
+  return canonicalCategory(t) ?? t; // known -> canonical spelling; custom passes through
 }
 
 async function readJson(req: Request): Promise<Record<string, any>> {

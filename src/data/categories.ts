@@ -1,27 +1,9 @@
-// Canonical list of expense categories. You said these will be refined later —
-// this is just a sensible starting set. Add/rename freely; any category that
-// shows up in your data but isn't listed here still works (it just falls back
-// to the 📁 icon).
+// The category list lives in ONE place, shared with the Supabase functions:
+// supabase/functions/_shared/categories.ts. Edit it there, not here.
+import { CATEGORIES } from "../../supabase/functions/_shared/categories";
 
-export interface Category {
-  name: string;
-  /** Emoji used as the category icon. */
-  icon: string;
-}
-
-export const CATEGORIES: Category[] = [
-  { name: "Groceries", icon: "🛒" },
-  { name: "Car", icon: "🚗" },
-  { name: "Gas", icon: "⛽" },
-  { name: "Shopping", icon: "🛍️" },
-  { name: "Dining", icon: "🍽️" },
-  { name: "Utilities", icon: "💡" },
-  { name: "Health", icon: "💊" },
-  { name: "Home", icon: "🏠" },
-  { name: "Entertainment", icon: "🎬" },
-  { name: "Travel", icon: "✈️" },
-  { name: "Other", icon: "📁" },
-];
+export type { Category } from "../../supabase/functions/_shared/categories";
+export { CATEGORIES };
 
 const ICON_BY_NAME = new Map(
   CATEGORIES.map((c) => [c.name.toLowerCase(), c.icon])
