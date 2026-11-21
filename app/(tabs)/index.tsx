@@ -5,6 +5,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import { useRouter } from "expo-router";
@@ -23,6 +24,12 @@ import {
 import { colors, maxContentWidth, radius, spacing } from "../../src/lib/theme";
 import { Expense } from "../../src/types/expense";
 import { Locked } from "../../src/components/Locked";
+import {
+  ExpenseFilter,
+  categoriesInUse,
+  isFilterActive,
+  searchExpenses,
+} from "../../src/data/search";
 
 export default function ExpensesScreen() {
   const router = useRouter();
@@ -30,6 +37,10 @@ export default function ExpensesScreen() {
   const { expenses } = useExpenses();
   const { isOwner, ready } = useAuth();
   const [month, setMonth] = useState(currentMonthKey());
+  const [query, setQuery] = useState("");
+  const [category, setCategory] = useState<string | null>(null);
+  const filter: ExpenseFilter = { query, category };
+  const searching = isFilterActive(filter);
 
   // Gate: when Supabase is configured, nothing is visible until the owner logs
   // in. (In demo mode we show the sample data freely.)
@@ -47,6 +58,15 @@ export default function ExpensesScreen() {
     () => expenseStore.getByMonth(month).length,
     [expenses, month]
   );
+  const chipCategories = useMemo(() => categoriesInUse(expenses), [expenses]);
+  const results = useMemo(
+    () => (searching ? searchExpenses(expenses, filter) : null),
+    [expenses, query, category]
+  );
+  const clearSearch = () => {
+    setQuery("");
+    setCategory(null);
+  };
 
   if (locked) return <Locked />;
 
@@ -73,6 +93,59 @@ export default function ExpensesScreen() {
         style={styles.centeredList}
         contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 120 }]}
       >
+        {/* Search + category filter */}
+        <View style={styles.searchRow}>
+          <Text style={styles.searchIcon}>🔍</Text>
+          <TextInput
+            style={styles.searchInput}
+            value={query}
+            onChangeText={setQuery}
+            placeholder="Search merchant, note, or amount"
+            placeholderTextColor={colors.textMuted}
+            autoCorrect={false}
+            autoCapitalize="none"
+            returnKeyType="search"
+            clearButtonMode="never"
+            accessibilityLabel="Search expenses"
+          />
+          {searching && (
+            <Pressable onPress={clearSearch} hitSlop={8} accessibilityLabel="Clear search">
+              <Text style={styles.clearText}>Clear</Text>
+            </Pressable>
+          )}
+        </View>
+        {chipCategories.length > 1 && (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.chips}
+          >
+            {chipCategories.map((c) => {
+              const on = category === c;
+              return (
+                <Pressable
+                  key={c}
+                  style={[styles.chip, on && styles.chipOn]}
+                  onPress={() => setCategory(on ? null : c)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: on }}
+                >
+                  <Text style={[styles.chipText, on && styles.chipTextOn]}>
+                    {iconForCategory(c)} {c}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        )}
+
+        {results ? (
+          <SearchResults
+            results={results}
+            onOpen={(id) => router.push(`/expense/${id}`)}
+          />
+        ) : (
+        <>
         {/* Month switcher + total */}
         <View style={styles.header}>
           <View style={styles.monthRow}>
@@ -131,6 +204,8 @@ export default function ExpensesScreen() {
             );
           })
         )}
+        </>
+        )}
       </ScrollView>
 
       <Pressable
@@ -143,13 +218,63 @@ export default function ExpensesScreen() {
   );
 }
 
+function SearchResults({
+  results,
+  onOpen,
+}: {
+  results: ReturnType<typeof searchExpenses>;
+  onOpen: (id: string) => void;
+}) {
+  return (
+    <View>
+      <View style={styles.resultsHeader}>
+        <Text style={styles.total}>{formatCurrency(results.total)}</Text>
+        <Text style={styles.totalCaption}>
+          {results.count} match{results.count === 1 ? "" : "es"} across all months
+        </Text>
+      </View>
+      {results.count === 0 ? (
+        <View style={styles.empty}>
+          <Text style={styles.emptyText}>No matching expenses.</Text>
+          <Text style={styles.emptySub}>Try a different word or category.</Text>
+        </View>
+      ) : (
+        results.months.map((m) => (
+          <View key={m.key} style={styles.group}>
+            <View style={styles.groupHeader}>
+              <Text style={styles.groupTitle}>{monthLabel(m.key)}</Text>
+              <Text style={styles.groupTotal}>{formatCurrency(m.total)}</Text>
+            </View>
+            <Text style={styles.groupMeta}>
+              {m.expenses.length} item{m.expenses.length === 1 ? "" : "s"}
+            </Text>
+            <View style={styles.groupCard}>
+              {m.expenses.map((e, i) => (
+                <ExpenseRow
+                  key={e.id}
+                  expense={e}
+                  divider={i > 0}
+                  showCategory
+                  onPress={() => onOpen(e.id)}
+                />
+              ))}
+            </View>
+          </View>
+        ))
+      )}
+    </View>
+  );
+}
+
 function ExpenseRow({
   expense,
   divider,
+  showCategory = false,
   onPress,
 }: {
   expense: Expense;
   divider: boolean;
+  showCategory?: boolean;
   onPress: () => void;
 }) {
   return (
@@ -163,6 +288,7 @@ function ExpenseRow({
     >
       <View style={styles.rowBody}>
         <Text style={styles.rowTitle} numberOfLines={1}>
+          {showCategory ? `${iconForCategory(expense.category)}  ` : ""}
           {expense.merchant || "Unknown merchant"}
         </Text>
         <Text style={styles.rowSubtitle} numberOfLines={1}>
@@ -189,6 +315,43 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
   },
   bannerText: { color: colors.primary, fontSize: 12 },
+  searchRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    marginTop: spacing.lg,
+    paddingHorizontal: spacing.md,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+  },
+  searchIcon: { fontSize: 14 },
+  searchInput: {
+    flex: 1,
+    paddingVertical: spacing.md,
+    fontSize: 16,
+    color: colors.text,
+  },
+  clearText: { color: colors.primary, fontWeight: "600", fontSize: 14 },
+  chips: { gap: spacing.sm, paddingVertical: spacing.sm },
+  chip: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  chipOn: { backgroundColor: colors.primarySoft, borderColor: colors.primary },
+  chipText: { fontSize: 13, color: colors.text },
+  chipTextOn: { color: colors.primary, fontWeight: "700" },
+  resultsHeader: {
+    paddingTop: spacing.md,
+    paddingBottom: spacing.sm,
+    alignItems: "center",
+    gap: spacing.xs,
+  },
   header: {
     paddingTop: spacing.lg,
     paddingBottom: spacing.sm,
