@@ -20,12 +20,22 @@ signed URLs.
 
 - 🧾 **Expenses by month** — a month switcher, the month's total, and expenses
   grouped by category (merchant, category, date, amount).
+- 🔍 **Search and filter**: search merchant, note, or amount ("45" finds
+  $45.xx) and tap a category chip. Results cover every month, grouped by month,
+  with a running total.
 - 📊 **Monthly breakdown** — per-category totals with bars + an all-months
-  overview.
+  overview, plus **month-over-month change** ("▲ 7% vs Oct") and the biggest
+  category movers. The current month is compared with the same days of last
+  month, so a half-finished month doesn't look artificially cheap.
 - 🏷️ **Categories tab** — all-time totals per category; tap one to see every
   expense in it, grouped by month.
 - ✨ **Scan a receipt** — snap/attach a receipt photo and AI fills in merchant,
   amount, date, and a category for you to confirm.
+- 📚 **Scan several receipts at once**: pick many photos, each is scanned in
+  the background, then review and save them together (New Expense → "Scan
+  them all at once").
+- ⚠️ **Duplicate warnings**: before saving, the app flags an expense with the
+  same amount within a day of one you already have (or another in the batch).
 - 🤖 **Muse can log for you** — send a receipt photo to your agent; it reads it
   and logs the expense via a secure token API (see [Let Muse log expenses](#let-muse-log-expenses-agent-api)).
 - 🔐 **Passcode lock** — set a passcode on first run (confirmed by a one-time
@@ -83,8 +93,9 @@ Each user owns their rows (`expenses.user_id = auth.uid()`) and has their own
 row in `user_passcode`. To **add a person**: create their Supabase auth user,
 add them to those three lists, re-create the three `users … receipt photos`
 storage policies with the new email list (the `drop policy` / `create policy`
-block in `schema-multiuser.sql` does exactly this), and redeploy the functions + web build. Muse's
-`agent-api` logs for one user, set by the `AGENT_USER_ID` secret.
+block in `schema-multiuser.sql` does exactly this), and redeploy the functions + web build. To let them use Muse
+too, give them their own token in `AGENT_TOKENS` (see
+[Let Muse log expenses](#let-muse-log-expenses-agent-api)).
 
 ## How the passcode lock works
 
@@ -177,9 +188,11 @@ supabase functions deploy parse-receipt --project-ref $REF --no-verify-jwt
 # passcode gate
 supabase functions deploy passcode --project-ref $REF --no-verify-jwt
 
-# Muse's API (token-based)
-supabase secrets set EXPENSE_AGENT_TOKEN=$(openssl rand -hex 32) \
-  AGENT_USER_ID=<auth user id Muse logs for> --project-ref $REF
+# Muse's API: one token per person ("token:email,token:email")
+T1=$(openssl rand -hex 32); T2=$(openssl rand -hex 32)
+echo "you: $T1"; echo "partner: $T2"   # save these: Supabase can't show them again
+supabase secrets set AGENT_TOKENS="$T1:you@example.com,$T2:partner@example.com" \
+  --project-ref $REF
 supabase functions deploy agent-api --project-ref $REF --no-verify-jwt
 ```
 
@@ -213,11 +226,15 @@ in merchant / amount / date / category for you to review.
 
 ## Let Muse log expenses (agent-api)
 
-So you can just **send a receipt photo to Muse** and have it logged. Muse uses a
-dedicated bearer token (`EXPENSE_AGENT_TOKEN`), independent of the Recipe app.
+So you can just **send a receipt photo to Muse** and have it logged. **Each
+person has their own token**, and the token decides whose expenses Muse reads
+and writes, so your Muse can't see or change the other person's expenses.
+Tokens live in the `AGENT_TOKENS` secret as `token:email` pairs, separated by
+commas. (The older single-user `EXPENSE_AGENT_TOKEN` + `AGENT_USER_ID` pair still
+works, and counts as one more entry.)
 
 Base URL: `https://<project>.supabase.co/functions/v1/agent-api`
-Header on every call: `Authorization: Bearer <EXPENSE_AGENT_TOKEN>`
+Header on every call: `Authorization: Bearer <your token>`
 
 | Method | Path | Purpose |
 |--------|------|---------|
@@ -233,7 +250,7 @@ Dates are `YYYY-MM-DD`; amount is a number. A standing instruction for Muse:
 > When I send you a photo of a receipt, read the merchant, total amount, date,
 > and a category, then `POST` it to my expense API at
 > `https://<project>.supabase.co/functions/v1/agent-api/expenses` with header
-> `Authorization: Bearer <EXPENSE_AGENT_TOKEN>` and a JSON body
+> `Authorization: Bearer <my token>` and a JSON body
 > `{ "merchant", "amount", "date": "YYYY-MM-DD", "category", "note" }`.
 > Then confirm the amount, merchant, and category back to me.
 
